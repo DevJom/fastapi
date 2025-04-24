@@ -76,7 +76,7 @@ class ChestXRayModel:
 model = ChestXRayModel()
 
 @app.get("/")
-def read_root():
+async def root():
     return {"status": "API is running", "model": "ChestXRay Classifier"}
 
 @app.post("/predict")
