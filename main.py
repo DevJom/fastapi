@@ -13,40 +13,50 @@ from pathlib import Path
 # Initialize FastAPI app
 app = FastAPI()
 
-# Add CORS middleware
+# Update CORS middleware with specific origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for deployment
+    allow_origins=[
+        "https://deeplungv2.vercel.app",  # Replace with your frontend domain
+        "http://localhost:3000",  # For local development
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 class ChestXRayModel:
-    def __init__(self, model_path="deeplung-model.pt"):
-        # Get the directory where the script is located
+    def __init__(self, model_path=None):
+        # Try to get model path from environment variable
+        self.model_path = model_path or os.getenv('MODEL_PATH', 'deeplung-model.pt')
         base_dir = Path(__file__).parent.absolute()
-        model_path = os.path.join(base_dir, model_path)
+        self.model_path = os.path.join(base_dir, self.model_path)
         
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"Model file not found at {model_path}. Please ensure the model file exists.")
+        # Add error handling for model loading
+        try:
+            if not os.path.exists(self.model_path):
+                raise FileNotFoundError(f"Model file not found at {self.model_path}")
             
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.categories = ["NORMAL", "PNEUMONIA", "UNKNOWN", "TUBERCULOSIS"]
-        
-        self.transformations = transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.Grayscale(num_output_channels=3),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ])
-        
-        self.model = models.resnet18(pretrained=False)
-        self.model.fc = nn.Linear(self.model.fc.in_features, 4)
-        self.model.load_state_dict(torch.load(model_path, map_location=self.device))
-        self.model.eval()
-        torch.set_grad_enabled(False)
-        self.model.to(self.device)
+            self.device = torch.device("cpu")  # Force CPU for Railway deployment
+            self.categories = ["NORMAL", "PNEUMONIA", "UNKNOWN", "TUBERCULOSIS"]
+            
+            self.transformations = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.Grayscale(num_output_channels=3),
+                transforms.ToTensor(),
+                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+            ])
+            
+            self.model = models.resnet18(pretrained=False)
+            self.model.fc = nn.Linear(self.model.fc.in_features, 4)
+            self.model.load_state_dict(torch.load(self.model_path, map_location=self.device))
+            self.model.eval()
+            torch.set_grad_enabled(False)
+            self.model.to(self.device)
+            
+        except Exception as e:
+            print(f"Error loading model: {str(e)}")
+            raise
     
     def predict(self, image):
         if isinstance(image, bytes):
@@ -72,12 +82,23 @@ class ChestXRayModel:
             "probabilities": all_probs
         }
 
-# Initialize model once
-model = ChestXRayModel()
+# Initialize model with error handling
+try:
+    model = ChestXRayModel()
+except Exception as e:
+    print(f"Failed to initialize model: {str(e)}")
+    model = None
 
 @app.get("/")
 async def root():
     return {"status": "API is running", "model": "ChestXRay Classifier"}
+
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "model_loaded": model is not None
+    }
 
 @app.post("/predict")
 async def predict_api(images: list[UploadFile] = File(...)):
