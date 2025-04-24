@@ -7,6 +7,8 @@ from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 import io
 import base64
+import os
+from pathlib import Path
 
 # Initialize FastAPI app
 app = FastAPI()
@@ -21,7 +23,14 @@ app.add_middleware(
 )
 
 class ChestXRayModel:
-    def __init__(self, model_path="/deeplung-model.pt"):
+    def __init__(self, model_path="deeplung-model.pt"):
+        # Get the directory where the script is located
+        base_dir = Path(__file__).parent.absolute()
+        model_path = os.path.join(base_dir, model_path)
+        
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Model file not found at {model_path}. Please ensure the model file exists.")
+            
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.categories = ["NORMAL", "PNEUMONIA", "UNKNOWN", "TUBERCULOSIS"]
         
