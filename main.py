@@ -70,10 +70,6 @@ model = ChestXRayModel()
 def read_root():
     return {"status": "API is running", "model": "ChestXRay Classifier"}
 
-@app.get("/healthz")
-def health_check():
-    return {"status": "ok"}
-
 @app.post("/predict")
 async def predict_api(images: list[UploadFile] = File(...)):
     return [{"filename": file.filename, "prediction": model.predict(await file.read())} 
