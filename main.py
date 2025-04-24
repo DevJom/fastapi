@@ -17,8 +17,9 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://deeplungv2.vercel.app",  # Replace with your frontend domain
-        "http://localhost:3000",  # For local development
+        # "https://deeplungv2.vercel.app",  # Replace with your frontend domain
+        # "http://localhost:3000",  # For local development
+        "*"
     ],
     allow_credentials=True,
     allow_methods=["*"],
