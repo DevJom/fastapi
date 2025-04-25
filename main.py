@@ -17,12 +17,18 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://deeplungv2.vercel.app",  # Replace with your frontend domain
-        "http://localhost:3000",  # For local development
+        "https://deeplungv2.vercel.app",
+        "https://deeplungv2.vercel.app/dashboard/upload",
+        "https://deeplungv2.vercel.app/dashboard",
+        "http://localhost:3000",
+        "http://localhost:3000/dashboard/upload",
+        "http://localhost:3000/dashboard",
     ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600,
 )
 
 class ChestXRayModel:
