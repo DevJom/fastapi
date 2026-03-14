@@ -1,0 +1,8 @@
+[variables]
+NIXPACKS_PYTHON_VERSION = "3.10"
+
+[phases.install]
+cmds = ["python -m venv --copies /opt/venv && . /opt/venv/bin/activate && pip install --prefer-binary -r requirements.txt"]
+
+[start]
+cmd = "hypercorn main:app --bind \"[::]:$PORT\""
