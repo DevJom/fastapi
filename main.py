@@ -3,29 +3,28 @@ import torch.nn as nn
 import torchvision.models as models
 from torchvision import transforms
 from PIL import Image
-from fastapi import FastAPI, File, UploadFile, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import io
-import base64
 import os
 from pathlib import Path
+from typing import Iterable
 
 # Initialize FastAPI app
 app = FastAPI()
 
-# Update CORS middleware with specific origins
+# CORS configuration (supports production + Vercel preview deployments)
+cors_origins = os.getenv(
+    "CORS_ORIGINS",
+    "https://deeplungv2.vercel.app,http://localhost:3000,http://127.0.0.1:3000",
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://deeplungv2.vercel.app",
-        "https://deeplungv2.vercel.app/dashboard/upload",
-        "https://deeplungv2.vercel.app/dashboard",
-        "http://localhost:3000",
-        "http://localhost:3000/dashboard/upload",
-        "http://localhost:3000/dashboard",
-    ],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_origins=[origin.strip() for origin in cors_origins.split(",") if origin.strip()],
+    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_credentials=False,
+    allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],
     max_age=3600,
@@ -53,40 +52,52 @@ class ChestXRayModel:
                 transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
             ])
             
-            self.model = models.resnet18(pretrained=False)
+            self.model = models.resnet18(weights=None)
             self.model.fc = nn.Linear(self.model.fc.in_features, 4)
             self.model.load_state_dict(torch.load(self.model_path, map_location=self.device))
             self.model.eval()
-            torch.set_grad_enabled(False)
             self.model.to(self.device)
             
         except Exception as e:
             print(f"Error loading model: {str(e)}")
             raise
     
-    def predict(self, image):
+    def _read_image(self, image):
         if isinstance(image, bytes):
-            image = Image.open(io.BytesIO(image)).convert("RGB")
+            return Image.open(io.BytesIO(image)).convert("RGB")
         elif isinstance(image, str):
-            image = Image.open(image).convert("RGB")
-        else:
-            image = Image.fromarray(image).convert("RGB")
-            
-        image_tensor = self.transformations(image).to(self.device).unsqueeze(0)
-        output = self.model(image_tensor)
+            return Image.open(image).convert("RGB")
+
+        return Image.fromarray(image).convert("RGB")
+
+    @torch.inference_mode()
+    def predict_batch(self, images: Iterable):
+        image_tensors = [self.transformations(self._read_image(image)) for image in images]
+        batch_tensor = torch.stack(image_tensors, dim=0).to(self.device)
+        output = self.model(batch_tensor)
         probabilities = torch.nn.functional.softmax(output, dim=1)
-        
-        pred_idx = output.argmax(dim=1).item()
-        confidence = probabilities[0, pred_idx].item() * 100
-        
-        all_probs = {self.categories[i]: round(float(probabilities[0, i].item()) * 100, 2) 
-                     for i in range(len(self.categories))}
-            
-        return {
-            "prediction": self.categories[pred_idx],
-            "confidence": round(confidence, 2),
-            "probabilities": all_probs
-        }
+
+        results = []
+        for batch_idx in range(output.shape[0]):
+            pred_idx = output[batch_idx].argmax().item()
+            confidence = probabilities[batch_idx, pred_idx].item() * 100
+            all_probs = {
+                self.categories[i]: round(float(probabilities[batch_idx, i].item()) * 100, 2)
+                for i in range(len(self.categories))
+            }
+
+            results.append(
+                {
+                    "prediction": self.categories[pred_idx],
+                    "confidence": round(confidence, 2),
+                    "probabilities": all_probs,
+                }
+            )
+
+        return results
+
+    def predict(self, image):
+        return self.predict_batch([image])[0]
 
 # Initialize model with error handling
 try:
@@ -108,10 +119,12 @@ async def health_check():
 
 @app.post("/predict")
 async def predict_api(images: list[UploadFile] = File(...)):
-    return [{"filename": file.filename, "prediction": model.predict(await file.read())} 
-            for file in images]
+    if model is None:
+        raise HTTPException(status_code=503, detail="Model is not available")
 
-@app.post("/predict_base64")
-async def predict_base64_api(image_data: list[str] = Form(...)):
-    return [model.predict(base64.b64decode(data.split("base64,")[1] if "base64," in data else data)) 
-            for data in image_data]
+    image_bytes = [await file.read() for file in images]
+    predictions = model.predict_batch(image_bytes)
+    return [
+        {"filename": file.filename, "prediction": predictions[idx]}
+        for idx, file in enumerate(images)
+    ]
