@@ -13,15 +13,18 @@ from typing import Iterable
 # Initialize FastAPI app
 app = FastAPI()
 
-# Update CORS middleware with specific origins
+# CORS configuration (supports production + Vercel preview deployments)
+cors_origins = os.getenv(
+    "CORS_ORIGINS",
+    "https://deeplungv2.vercel.app,http://localhost:3000,http://127.0.0.1:3000",
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://deeplungv2.vercel.app",
-        "http://localhost:3000",
-    ],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_origins=[origin.strip() for origin in cors_origins.split(",") if origin.strip()],
+    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_credentials=False,
+    allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],
     max_age=3600,
